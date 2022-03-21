@@ -1,11 +1,20 @@
 # These variables are specifically meant to be overridable via the make
 # command-line.
-CC ?= clang
 NM ?= $(patsubst %clang,%llvm-nm,$(filter-out ccache sccache,$(CC)))
 AR ?= $(patsubst %clang,%llvm-ar,$(filter-out ccache sccache,$(CC)))
 EXTRA_CFLAGS ?= -O2 -DNDEBUG
-# The directory where we build the sysroot.
+# These variables describe the locations of various files and
+# directories to install.
+#
+# `SYSROOT` is just used to define the defaults, and in the install
+# rule. That means you should not override `SYSROOT_*` if you are going
+# to run `make install`, but if you don't need to, you are free to move
+# the `SYSROOT_*` directories around freely, not preserving their
+# default locations relative `SYSROOT`.
 SYSROOT ?= $(CURDIR)/sysroot
+SYSROOT_LIB ?= $(SYSROOT)/lib/$(MULTIARCH_TRIPLE)
+SYSROOT_INC ?= $(SYSROOT)/include
+SYSROOT_SHARE ?= $(SYSROOT)/share/$(MULTIARCH_TRIPLE)
 # A directory to install to for "make install".
 INSTALL_DIR ?= /usr/local
 # single or posix
@@ -254,12 +263,6 @@ LIBWASI_EMULATED_GETPID_OBJS = $(call objs,$(LIBWASI_EMULATED_GETPID_SOURCES))
 LIBWASI_EMULATED_SIGNAL_OBJS = $(call objs,$(LIBWASI_EMULATED_SIGNAL_SOURCES))
 LIBWASI_EMULATED_SIGNAL_MUSL_OBJS = $(call objs,$(LIBWASI_EMULATED_SIGNAL_MUSL_SOURCES))
 
-# These variables describe the locations of various files and
-# directories in the generated sysroot tree.
-SYSROOT_LIB := $(SYSROOT)/lib/$(MULTIARCH_TRIPLE)
-SYSROOT_INC = $(SYSROOT)/include
-SYSROOT_SHARE = $(SYSROOT)/share/$(MULTIARCH_TRIPLE)
-
 # Files from musl's include directory that we don't want to install in the
 # sysroot's include directory.
 MUSL_OMIT_HEADERS :=
@@ -472,7 +475,11 @@ finish: startup_files libc
 	done
 
 	#
-	# The build succeeded! The generated sysroot is in $(SYSROOT).
+	# The build succeeded! The generated files are in
+	#
+	# lib:     $(SYSROOT_LIB)
+	# include: $(SYSROOT_INC)
+	# share:   $(SYSROOT_SHARE)
 	#
 
 # The check for defined and undefined symbols expects there to be a heap
@@ -561,12 +568,29 @@ check-symbols: startup_files libc
 	# This ignores whitespace because on Windows the output has CRLF line endings.
 	diff -wur "$(CURDIR)/expected/$(MULTIARCH_TRIPLE)" "$(SYSROOT_SHARE)"
 
+NORMAL_SYSROOT := \
+	$(findstring $(SYSROOT)/lib,$(SYSROOT_LIB)) \
+	$(findstring $(SYSROOT)/include,$(SYSROOT_INC)) \
+	$(findstring $(SYSROOT)/share,$(SYSROOT_SHARE))
+
+# If the 3 dirs are not within the standard locations, the install rule
+# is undefined. This protects the user from doing something silly by
+# mistake.
+ifeq ($(SYSROOT)/lib $(SYSROOT)/include $(SYSROOT)/share,$(strip $(NORMAL_SYSROOT)))
 install: finish
 	mkdir -p "$(INSTALL_DIR)"
 	cp -r "$(SYSROOT)/lib" "$(SYSROOT)/share" "$(SYSROOT)/include" "$(INSTALL_DIR)"
+.PHONY: install
+endif
+
+clean:
+	$(RM) -r "$(OBJDIR)"
+	$(RM) -r "$(SYSROOT_INC)"
+	$(RM) -r "$(SYSROOT_LIB)"
+	$(RM) -r "$(SYSROOT_SHARE)"
 
 clean:
 	$(RM) -r "$(OBJDIR)"
 	$(RM) -r "$(SYSROOT)"
 
-.PHONY: default startup_files libc finish install include_dirs clean
+.PHONY: default startup_files libc finish include_dirs clean
